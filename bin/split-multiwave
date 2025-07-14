@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+
+# Split and merge time-segmented multi-channel WAVs into single-channel non-segmented WAVs
+
+import argparse
+import glob
+import os
+import subprocess
+import tempfile
+import sys
+
+def run_command(cmd):
+    print("Running:", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Split multitrack WAV segments into per-channel mono files"
+    )
+    parser.add_argument(
+        "--pattern", default="*.wav",
+        help="Glob for your segmented WAV files (non-recursive)"
+    )
+    parser.add_argument(
+        "--channels", type=int, default=32,
+        help="Number of channels to extract"
+    )
+    parser.add_argument(
+        "--output-dir", default="output",
+        help="Directory for the final mono files"
+    )
+    args = parser.parse_args()
+
+    segments = sorted(glob.glob(args.pattern))
+    if not segments:
+        print(f"No files match pattern {args.pattern!r}", file=sys.stderr)
+        sys.exit(1)
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # split each segment into per-channel files with pan filter
+        for seg in segments:
+            base = os.path.splitext(os.path.basename(seg))[0]
+            for ch in range(args.channels):
+                out = os.path.join(tmpdir, f"{base}_ch{ch+1:02d}.wav")
+                run_command([
+                    "ffmpeg", "-i", seg,
+                    "-filter_complex", f"pan=mono|c0=c{ch}",
+                    "-c:a", "pcm_s16le", out
+                ])
+
+        # concatenate each channel's pieces into one long mono file
+        for ch in range(args.channels):
+            pieces = sorted(glob.glob(os.path.join(tmpdir, f"* _ch{ch+1:02d}.wav").replace(" ", "")))
+            # if there’s no file for this channel, skip it
+            if not pieces:
+                print(f"Skipping channel {ch+1}: no segments found.", file=sys.stderr)
+                continue
+
+            list_file = os.path.join(tmpdir, f"ch{ch+1:02d}.txt")
+            with open(list_file, "w") as lf:
+                for p in pieces:
+                    lf.write(f"file '{p}'\n")
+
+            final = os.path.join(args.output_dir, f"channel{ch+1:02d}.wav")
+            run_command([
+                "ffmpeg", "-f", "concat", "-safe", "0",
+                "-i", list_file,
+                "-c", "copy", final
+            ])
+
+if __name__ == "__main__":
+    main()
+

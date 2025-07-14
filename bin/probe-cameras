@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+
+import uvc
+
+def main():
+    # List all UVC devices
+    for dev in uvc.device_list():
+        uid = dev['uid']
+        name = dev['name']
+        print(f"Probing {name} ({uid}):")
+
+        cap = uvc.Capture(uid)
+        try:
+            for ctrl in cap.controls:
+                step = getattr(ctrl, 'step', None)
+                unit = getattr(ctrl, 'unit', None)
+                print(
+                    f"  {ctrl.display_name:10} "
+                    f"value={ctrl.value:4} "
+                    f"step={step!s:4} "
+                    f"unit={unit!s}"
+                )
+        finally:
+            cap.close()
+
+if __name__ == '__main__':
+    main()
+

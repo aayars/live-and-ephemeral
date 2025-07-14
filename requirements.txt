@@ -1,0 +1,5 @@
+ffmpeg-python==0.2.0
+numpy==2.0.2
+pupil_labs_uvc==1.0.0b7
+pyobjc-core==11.1
+requests==2.32.4

@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+
+# Send commands to UVC-controlled cameras
+
+import uvc
+
+### Night
+BRIGHTNESS = 0.75
+CONTRAST = 0.625
+GAIN = 0.75
+
+### Day
+# BRIGHTNESS = 0.625
+# CONTRAST = 0.625
+# GAIN = 0.625
+
+# Hard-coded ranges and targets
+BRIGHTNESS_MIN, BRIGHTNESS_MAX = -128, 127
+CONTRAST_MIN, CONTRAST_MAX = 1, 255
+GAIN_MIN, GAIN_MAX = 1, 30
+STEP = 1
+
+TARGET_BRIGHTNESS = int(BRIGHTNESS_MIN + (BRIGHTNESS_MAX - BRIGHTNESS_MIN) * BRIGHTNESS)
+TARGET_CONTRAST = int(CONTRAST_MIN + (CONTRAST_MAX - CONTRAST_MIN) * CONTRAST)
+TARGET_GAIN = int(GAIN_MIN + (GAIN_MAX - GAIN_MIN) * GAIN)
+
+def adjust_camera(uid):
+    cap = uvc.Capture(uid)
+    try:
+        ctrls = {c.display_name: c for c in cap.controls}
+
+        if 'Brightness' in ctrls:
+            ctrls['Brightness'].value = TARGET_BRIGHTNESS
+
+        if 'Contrast' in ctrls:
+            ctrls['Contrast'].value = TARGET_CONTRAST
+
+        if 'Gain' in ctrls:
+            ctrls['Gain'].value = TARGET_GAIN
+
+    finally:
+        cap.close()
+
+    print(
+        f"{uid}: Brightness → {TARGET_BRIGHTNESS}, "
+        f"Gain → {TARGET_GAIN}"
+    )
+
+def main():
+    for dev in uvc.device_list():
+        print(f"Found {dev['name']} ({dev['uid']})")
+        adjust_camera(dev['uid'])
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+
+# Visualize a folder containing many single-channel WAVs
+
+import sys
+from pathlib import Path
+import ffmpeg
+
+def visualize_mono_wavs(
+    input_dir: str,
+    output_file: str,
+    width: int = 1280,
+    per_channel_height: int = 20,
+    fps: int = 30
+):
+    wav_files = sorted(Path(input_dir).glob("*.wav"))
+    if not wav_files:
+        raise FileNotFoundError(f"No .wav files found in {input_dir!r}")
+
+    inputs = [ffmpeg.input(str(wav)) for wav in wav_files]
+
+    waves = [
+        ffmpeg.filter(
+            inp,
+            "showwaves",
+            mode="cline",
+            s=f"{width}x{per_channel_height}",
+            rate=fps
+        )
+        for inp in inputs
+    ]
+
+    stacked = ffmpeg.filter(waves, "vstack", inputs=len(waves))
+
+    (
+        ffmpeg
+        .output(
+            stacked,
+            output_file,
+            vcodec="libx264",
+            pix_fmt="yuv420p",
+            movflags="+faststart"
+        )
+        .overwrite_output()
+        .run()
+    )
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print(f"Usage: {sys.argv[0]} <input_mono_wavs_dir> <output_mp4>", file=sys.stderr)
+        sys.exit(1)
+
+    visualize_mono_wavs(sys.argv[1], sys.argv[2])
+
