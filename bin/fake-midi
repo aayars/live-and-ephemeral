@@ -5,10 +5,10 @@ import random
 
 def generate_test_data(
     filename="midi_events.csv",
-    total_time=10.0,
+    total_time=120.0,
     note_min=21,
     note_max=108,
-    event_count=200
+    event_count=2000
 ):
     events = []
 

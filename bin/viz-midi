@@ -7,15 +7,32 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 # ——— CONFIGURATION ———
+CHANNELS = [
+    'solar 42f',
+    '303 1',
+    '303 2',
+    '',
+    '',
+    'microfreak 1',
+    'microfreak 2',
+    '',
+    'hype',
+    'opx-4',
+    'kick',
+    'hi-hat',
+    'snare',
+    '', '', '', '', '', '', '']
+
+
 INPUT_CSV      = "midi_events.csv"
 OUTPUT_VIDEO   = "output.mp4"
 WIDTH          = 1280     # total video width
-HEIGHT         = 880
+HEIGHT         = 800
 FPS            = 30
-WINDOW_SEC     = 0.25      # time window in seconds
+WINDOW_SEC     = 0.125      # time window in seconds
 CHANNEL_COUNT  = 16
-LABEL_WIDTH    = 80       # space for swimlane labels
-LANE_H         = HEIGHT / CHANNEL_COUNT
+# LANE_H         = HEIGHT / CHANNEL_COUNT
+LANE_H         = 80
 MIN_THICKNESS  = 2        # minimum bar thickness
 
 # colors
@@ -25,7 +42,7 @@ LABEL_TEXT_COLOR = (255, 255, 255)
 # font for lane labels (using Nunito font from waveform visualizer)
 FONT_PATH = "/Users/aayars/.noisemaker/fonts/Nunito-VariableFont_wght.ttf"
 try:
-    FONT = ImageFont.truetype(FONT_PATH, int(LANE_H * 0.75))
+    FONT = ImageFont.truetype(FONT_PATH, int(LANE_H * 0.5))
 except IOError:
     FONT = ImageFont.load_default()
 
@@ -74,6 +91,17 @@ def start_ffmpeg():
 
 
 def draw_frame(now, notes, draw):
+    # map label positions
+    i = 0
+    labels = {}
+    for ch in range(CHANNEL_COUNT):
+        label = CHANNELS[ch]
+        if label == '':
+            continue
+
+        labels[ch] = i
+        i += 1
+
     # draw notes
     window_start = now - WINDOW_SEC
     for n in notes:
@@ -90,6 +118,12 @@ def draw_frame(now, notes, draw):
             continue
 
         lane = n['channel'] % CHANNEL_COUNT
+
+        if lane not in labels:
+            continue
+
+        lane = labels[lane]
+
         y_base = lane * LANE_H
         thickness = MIN_THICKNESS + (n['velocity'] / 127) * (LANE_H - MIN_THICKNESS) * 0.75
         y0 = y_base + (LANE_H - thickness) / 2
@@ -97,13 +131,19 @@ def draw_frame(now, notes, draw):
         draw.rectangle([x0, y0, x1, y1], fill=BAR_COLOR)
 
     # swimlane labels
+    i = 0
     for ch in range(CHANNEL_COUNT):
-        y_base = ch * LANE_H
-        label = f'Ch {ch+1}'
+        label = CHANNELS[ch]
+        if label == '':
+            continue
+
+        y_base = i * LANE_H
         bbox = draw.textbbox((0, 0), label, font=FONT)
         h = bbox[3] - bbox[1]
-        y = y_base + (LANE_H - h) / 2 - 12
+        y = y_base + (LANE_H - h) / 2 - 14
         draw.text((5, y), label, font=FONT, fill=LABEL_TEXT_COLOR)
+
+        i += 1
 
 
 def main():

@@ -10,14 +10,14 @@ PAIRS = [
     'hype',
     'opx-4',
     'kick',
-    'hh',
+    'hi-hat',
     'snare',
     '', # guitar
     '', # vocals
     'microfreak 1',
     'microfreak 2',
-    '303s bounce',
-    'crum bounce',
+    '303 bus',
+    'crum bus',
     'solar 42f',
     'traktor',
     '', '', '', '', '', '', '']
