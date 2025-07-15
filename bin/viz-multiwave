@@ -1,10 +1,27 @@
 #!/usr/bin/env python3
 
-# Visualize a folder containing many single-channel WAVs
+# Visualize a folder containing many single-channel WAVs (assume stereo pairs for labels)
 
 import sys
 from pathlib import Path
 import ffmpeg
+
+PAIRS = [
+    'hype',
+    'opx-4',
+    'kick',
+    'hh',
+    'snare',
+    '', # guitar
+    '', # vocals
+    'microfreak 1',
+    'microfreak 2',
+    '303s bounce',
+    'crum bounce',
+    'solar 42f',
+    'traktor',
+    '', '', '', '', '', '', '']
+
 
 def visualize_mono_wavs(
     input_dir: str,
@@ -14,32 +31,51 @@ def visualize_mono_wavs(
     fps: int = 30
 ):
     wav_files = sorted(Path(input_dir).glob("*.wav"))
-    if not wav_files:
-        raise FileNotFoundError(f"No .wav files found in {input_dir!r}")
+    if len(wav_files) % 2 != 0:
+        raise ValueError("Expected an even number of mono WAV files for stereo pairing")
 
-    inputs = [ffmpeg.input(str(wav)) for wav in wav_files]
+    waves = []
+    font = '/Users/aayars/.noisemaker/fonts/Nunito-VariableFont_wght.ttf'
 
-    waves = [
-        ffmpeg.filter(
-            inp,
-            "showwaves",
-            mode="cline",
-            s=f"{width}x{per_channel_height}",
-            rate=fps
+    for wav in wav_files:
+        # trim
+        stream = ffmpeg.input(str(wav), t=120)
+
+        wave = (
+            stream
+            .filter('showwaves', s=f"{width}x{per_channel_height}", mode='line')
+            .filter('format', 'rgba')
         )
-        for inp in inputs
-    ]
+        waves.append(wave)
 
-    stacked = ffmpeg.filter(waves, "vstack", inputs=len(waves))
+    # stack into stereo pairs with labels
+    paired = []
+    for i in range(0, len(waves), 2):
+        left, right = waves[i], waves[i + 1]
+        stereo = ffmpeg.filter([left, right], 'vstack', inputs=2)
+        pair_num = i // 2
+        labeled = stereo.filter(
+            'drawtext',
+            fontfile=font,
+            text=PAIRS[pair_num],
+            x='5',
+            y='10',
+            fontsize=per_channel_height,
+            fontcolor='white'
+        )
+        paired.append(labeled)
+
+    # stack all labeled stereo blocks
+    final = ffmpeg.filter(paired, 'vstack', inputs=len(paired))
 
     (
         ffmpeg
         .output(
-            stacked,
+            final,
             output_file,
-            vcodec="libx264",
-            pix_fmt="yuv420p",
-            movflags="+faststart"
+            r=fps,
+            pix_fmt='yuv420p',
+            movflags='+faststart'
         )
         .overwrite_output()
         .run()
@@ -51,4 +87,3 @@ if __name__ == "__main__":
         sys.exit(1)
 
     visualize_mono_wavs(sys.argv[1], sys.argv[2])
-
