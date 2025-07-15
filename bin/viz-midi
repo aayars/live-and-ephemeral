@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+
+import csv
+import subprocess
+import sys
+
+from PIL import Image, ImageDraw, ImageFont
+
+# ——— CONFIGURATION ———
+INPUT_CSV      = "midi_events.csv"
+OUTPUT_VIDEO   = "output.mp4"
+WIDTH          = 1280     # total video width
+HEIGHT         = 880
+FPS            = 30
+WINDOW_SEC     = 0.25      # time window in seconds
+CHANNEL_COUNT  = 16
+LABEL_WIDTH    = 80       # space for swimlane labels
+LANE_H         = HEIGHT / CHANNEL_COUNT
+MIN_THICKNESS  = 2        # minimum bar thickness
+
+# colors
+BAR_COLOR        = (127, 0, 0)
+LABEL_TEXT_COLOR = (255, 255, 255)
+
+# font for lane labels (using Nunito font from waveform visualizer)
+FONT_PATH = "/Users/aayars/.noisemaker/fonts/Nunito-VariableFont_wght.ttf"
+try:
+    FONT = ImageFont.truetype(FONT_PATH, int(LANE_H * 0.75))
+except IOError:
+    FONT = ImageFont.load_default()
+
+
+def load_events():
+    """
+    Load MIDI events from CSV with headers: time,type,note,velocity,channel
+    """
+    events = []
+    try:
+        with open(INPUT_CSV, newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    t = float(row['time'])
+                    evt_type = row['type']
+                    note = int(row['note'])
+                    velocity = int(row['velocity'])
+                    channel = int(row['channel'])
+                except (KeyError, ValueError):
+                    continue
+                events.append({'t': t, 'type': evt_type,
+                               'note': note, 'velocity': velocity,
+                               'channel': channel})
+    except FileNotFoundError:
+        print(f"Error: {INPUT_CSV} not found", file=sys.stderr)
+        sys.exit(1)
+
+    if not events:
+        print(f"Error: no valid MIDI events in {INPUT_CSV}", file=sys.stderr)
+        sys.exit(1)
+
+    return sorted(events, key=lambda e: e['t'])
+
+
+def start_ffmpeg():
+    cmd = [
+        'ffmpeg', '-y',
+        '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+        '-s', f'{WIDTH}x{HEIGHT}', '-r', str(FPS),
+        '-i', '-',
+        '-pix_fmt', 'yuv420p',
+        OUTPUT_VIDEO
+    ]
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE)
+
+
+def draw_frame(now, notes, draw):
+    # draw notes
+    window_start = now - WINDOW_SEC
+    for n in notes:
+        t_on = n['t_on']
+        t_off = n['t_off'] if n['t_off'] is not None else now
+        if t_off < window_start:
+            continue
+
+        rel_start = (now - t_on) / WINDOW_SEC
+        rel_end = (now - t_off) / WINDOW_SEC
+        x0 = WIDTH * max(0.0, 1 - rel_start)
+        x1 = WIDTH * max(0.0, 1 - rel_end)
+        if x0 >= WIDTH:
+            continue
+
+        lane = n['channel'] % CHANNEL_COUNT
+        y_base = lane * LANE_H
+        thickness = MIN_THICKNESS + (n['velocity'] / 127) * (LANE_H - MIN_THICKNESS) * 0.75
+        y0 = y_base + (LANE_H - thickness) / 2
+        y1 = y0 + thickness
+        draw.rectangle([x0, y0, x1, y1], fill=BAR_COLOR)
+
+    # swimlane labels
+    for ch in range(CHANNEL_COUNT):
+        y_base = ch * LANE_H
+        label = f'Ch {ch+1}'
+        bbox = draw.textbbox((0, 0), label, font=FONT)
+        h = bbox[3] - bbox[1]
+        y = y_base + (LANE_H - h) / 2 - 12
+        draw.text((5, y), label, font=FONT, fill=LABEL_TEXT_COLOR)
+
+
+def main():
+    events = load_events()
+    proc = start_ffmpeg()
+
+    last_t = events[-1]['t']
+    total_frames = int((last_t + WINDOW_SEC) * FPS) + 1
+
+    notes = []
+    idx = 0
+
+    for frame in range(total_frames):
+        now = frame / FPS
+
+        # ingest events
+        while idx < len(events) and events[idx]['t'] <= now:
+            e = events[idx]
+            if e['type'] == 'note_on' and e['velocity'] > 0:
+                notes.append({'t_on': e['t'], 't_off': None,
+                              'velocity': e['velocity'], 'channel': e['channel']})
+            elif e['type'] == 'note_off' or (e['type'] == 'note_on' and e['velocity'] == 0):
+                for n in reversed(notes):
+                    if n['channel'] == e['channel'] and n['t_off'] is None:
+                        n['t_off'] = e['t']
+                        break
+            idx += 1
+
+        # prune notes
+        window_start = now - WINDOW_SEC
+        notes = [n for n in notes if (n['t_off'] or now) >= window_start]
+
+        # render
+        img = Image.new('RGB', (WIDTH, HEIGHT))
+        draw = ImageDraw.Draw(img)
+        draw_frame(now, notes, draw)
+        proc.stdin.write(img.tobytes())
+
+    proc.stdin.close()
+    proc.wait()
+
+if __name__ == '__main__':
+    main()
+

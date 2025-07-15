@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+
+import csv
+import random
+
+def generate_test_data(
+    filename="midi_events.csv",
+    total_time=10.0,
+    note_min=21,
+    note_max=108,
+    event_count=200
+):
+    events = []
+
+    for _ in range(event_count):
+        t_on = random.uniform(0, total_time)
+        note = random.randint(note_min, note_max)
+        vel = random.randint(1, 127)
+        ch = random.randint(0, 15)
+
+        # note on
+        events.append({
+            "time":     t_on,
+            "type":     "note_on",
+            "note":     note,
+            "velocity": vel,
+            "channel":  ch
+        })
+
+        # note off
+        t_off = min(total_time, t_on + random.uniform(0.05, 1.0))
+        events.append({
+            "time":     t_off,
+            "type":     "note_off",
+            "note":     note,
+            "velocity": 0,
+            "channel":  ch
+        })
+
+    # sort events by timestamp
+    events.sort(key=lambda e: e["time"])
+
+    # write CSV
+    with open(filename, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["time", "type", "note", "velocity", "channel"])
+        for e in events:
+            writer.writerow([
+                f"{e['time']:.6f}",
+                e["type"],
+                e["note"],
+                e["velocity"],
+                e["channel"]
+            ])
+
+if __name__ == "__main__":
+    generate_test_data()
+    print("✔ Generated midi_events.csv with note_on and note_off events")
+

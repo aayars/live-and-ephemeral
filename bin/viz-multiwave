@@ -27,7 +27,7 @@ def visualize_mono_wavs(
     input_dir: str,
     output_file: str,
     width: int = 1280,
-    per_channel_height: int = 20,
+    per_channel_height: int = 40,
     fps: int = 30
 ):
     wav_files = sorted(Path(input_dir).glob("*.wav"))
@@ -38,8 +38,13 @@ def visualize_mono_wavs(
     font = '/Users/aayars/.noisemaker/fonts/Nunito-VariableFont_wght.ttf'
 
     for wav in wav_files:
-        # trim
-        stream = ffmpeg.input(str(wav), t=120)
+        # trim as needed
+        stream = (
+            ffmpeg
+            .input(str(wav))
+            .filter('atrim', start=2400, duration=120)
+            .filter('asetpts', 'PTS-STARTPTS')
+        )
 
         wave = (
             stream
@@ -51,15 +56,21 @@ def visualize_mono_wavs(
     # stack into stereo pairs with labels
     paired = []
     for i in range(0, len(waves), 2):
+        pair_num = i // 2
+
+        label = PAIRS[pair_num]
+        if label == '':
+            continue
+
         left, right = waves[i], waves[i + 1]
         stereo = ffmpeg.filter([left, right], 'vstack', inputs=2)
-        pair_num = i // 2
+
         labeled = stereo.filter(
             'drawtext',
             fontfile=font,
-            text=PAIRS[pair_num],
+            text=label,
             x='5',
-            y='10',
+            y='20',
             fontsize=per_channel_height,
             fontcolor='white'
         )

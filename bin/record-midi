@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+
+import time
+import csv
+import mido
+
+OUTPUT_CSV = "midi_events.csv"
+
+def main(port_name=None):
+    start = time.time()
+    inp = mido.open_input(port_name) if port_name else mido.open_input()
+
+    with open(OUTPUT_CSV, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["time", "type", "note", "velocity", "channel"])
+
+        for msg in inp:
+            if msg.type in ("note_on", "note_off"):
+                now = time.time() - start
+                writer.writerow([
+                    f"{now:.6f}",
+                    msg.type,
+                    msg.note,
+                    getattr(msg, "velocity", 0),
+                    msg.channel if hasattr(msg, "channel") else 0
+                ])
+
+if __name__ == "__main__":
+    main()
+
