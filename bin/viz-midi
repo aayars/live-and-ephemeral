@@ -29,18 +29,19 @@ OUTPUT_VIDEO   = "output.mp4"
 WIDTH          = 1280     # total video width
 HEIGHT         = 800
 FPS            = 30
-WINDOW_SEC     = 0.125      # time window in seconds
+WINDOW_SEC     = 1.0      # time window in seconds
 CHANNEL_COUNT  = 16
 # LANE_H         = HEIGHT / CHANNEL_COUNT
 LANE_H         = 80
 MIN_THICKNESS  = 2        # minimum bar thickness
 
 # colors
-BAR_COLOR        = (127, 0, 0)
+BAR_COLOR        = (96, 0, 0)
 LABEL_TEXT_COLOR = (255, 255, 255)
 
 # font for lane labels (using Nunito font from waveform visualizer)
-FONT_PATH = "/Users/aayars/.noisemaker/fonts/Nunito-VariableFont_wght.ttf"
+# FONT_PATH = "/Users/aayars/.noisemaker/fonts/Nunito-VariableFont_wght.ttf"
+FONT_PATH = "/Users/aayars/.noisemaker/fonts/DS-DIGIB.TTF"
 try:
     FONT = ImageFont.truetype(FONT_PATH, int(LANE_H * 0.5))
 except IOError:
@@ -92,15 +93,13 @@ def start_ffmpeg():
 
 def draw_frame(now, notes, draw):
     # map label positions
-    i = 0
-    labels = {}
-    for ch in range(CHANNEL_COUNT):
-        label = CHANNELS[ch]
-        if label == '':
-            continue
-
-        labels[ch] = i
-        i += 1
+    named_channels = [
+        (ch, CHANNELS[ch])
+        for ch in range(CHANNEL_COUNT)
+        if CHANNELS[ch]
+    ]
+    named_channels.sort(key=lambda x: x[1].lower())
+    lanes = {ch: i for i, (ch, _) in enumerate(named_channels)}
 
     # draw notes
     window_start = now - WINDOW_SEC
@@ -117,30 +116,28 @@ def draw_frame(now, notes, draw):
         if x0 >= WIDTH:
             continue
 
-        lane = n['channel'] % CHANNEL_COUNT
+        ch = n['channel'] % CHANNEL_COUNT
 
-        if lane not in labels:
+        if ch not in lanes:
             continue
 
-        lane = labels[lane]
+        lane = lanes[ch]
 
         y_base = lane * LANE_H
-        thickness = MIN_THICKNESS + (n['velocity'] / 127) * (LANE_H - MIN_THICKNESS) * 0.75
+        thickness = MIN_THICKNESS + (n['velocity'] / 127) * (LANE_H - MIN_THICKNESS) * 0.5
         y0 = y_base + (LANE_H - thickness) / 2
         y1 = y0 + thickness
-        draw.rectangle([x0, y0, x1, y1], fill=BAR_COLOR)
+        draw.rounded_rectangle([x0, y0, x1, y1], fill=BAR_COLOR, radius=8)
 
     # swimlane labels
     i = 0
-    for ch in range(CHANNEL_COUNT):
+    for ch, lane in lanes.items():
         label = CHANNELS[ch]
-        if label == '':
-            continue
 
         y_base = i * LANE_H
         bbox = draw.textbbox((0, 0), label, font=FONT)
         h = bbox[3] - bbox[1]
-        y = y_base + (LANE_H - h) / 2 - 14
+        y = y_base + (LANE_H - h) / 2 - 9
         draw.text((5, y), label, font=FONT, fill=LABEL_TEXT_COLOR)
 
         i += 1

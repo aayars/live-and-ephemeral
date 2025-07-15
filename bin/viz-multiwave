@@ -35,14 +35,14 @@ def visualize_mono_wavs(
         raise ValueError("Expected an even number of mono WAV files for stereo pairing")
 
     waves = []
-    font = '/Users/aayars/.noisemaker/fonts/Nunito-VariableFont_wght.ttf'
+    font = "/Users/aayars/.noisemaker/fonts/DS-DIGIB.TTF"
 
     for wav in wav_files:
         # trim as needed
         stream = (
             ffmpeg
             .input(str(wav))
-            .filter('atrim', start=2400, duration=120)
+            .filter('atrim', start=2400, duration=10)
             .filter('asetpts', 'PTS-STARTPTS')
         )
 
@@ -53,11 +53,10 @@ def visualize_mono_wavs(
         )
         waves.append(wave)
 
-    # stack into stereo pairs with labels
-    paired = []
+    # collect labeled stereo streams
+    labeled_streams = []
     for i in range(0, len(waves), 2):
         pair_num = i // 2
-
         label = PAIRS[pair_num]
         if label == '':
             continue
@@ -74,9 +73,13 @@ def visualize_mono_wavs(
             fontsize=per_channel_height,
             fontcolor='white'
         )
-        paired.append(labeled)
+        labeled_streams.append((label, labeled))
 
-    # stack all labeled stereo blocks
+    # sort by label alphabetically (case‑insensitive)
+    labeled_streams.sort(key=lambda x: x[0].lower())
+    paired = [stream for _, stream in labeled_streams]
+
+    # stack all labeled stereo blocks in alphabetical order
     final = ffmpeg.filter(paired, 'vstack', inputs=len(paired))
 
     (
@@ -91,6 +94,7 @@ def visualize_mono_wavs(
         .overwrite_output()
         .run()
     )
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
