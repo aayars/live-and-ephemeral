@@ -20,7 +20,7 @@ PAIRS = [
     'crum bus',
     'solar 42f',
     'traktor',
-    '', '', '', '', '', '', '']
+    '', '', 'clock']
 
 
 def visualize_mono_wavs(
@@ -81,7 +81,7 @@ def visualize_mono_wavs(
         labeled_streams.append((label, labeled))
 
     # sort by label alphabetically (case‑insensitive)
-    labeled_streams.sort(key=lambda x: x[0].lower())
+    labeled_streams.sort(key=lambda x: 'zzz' if x[0] == 'clock' else x[0].lower())
     paired = [stream for _, stream in labeled_streams]
 
     # stack all labeled stereo blocks in alphabetical order

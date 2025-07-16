@@ -21,13 +21,12 @@ CHANNELS = [
     'kick',
     'hi-hat',
     'snare',
-    '', '', '', '', '', '', '']
-
-
+    '', '', '', '', '', '', ''
+]
 INPUT_CSV      = "midi_events.csv"
 OUTPUT_VIDEO   = "midi-viz.mp4"
 WIDTH          = 1280     # total video width
-HEIGHT         = 800
+HEIGHT         = 880
 FPS            = 30
 WINDOW_SEC     = 2.5      # time window in seconds
 CHANNEL_COUNT  = 16
@@ -36,6 +35,7 @@ LANE_H         = 80
 MIN_THICKNESS  = 2        # minimum bar thickness
 
 # colors
+ACCENT_COLOR     = (255, 0, 0)
 BAR_COLOR        = (127, 0, 0)
 LABEL_TEXT_COLOR = (255, 255, 255)
 
@@ -54,8 +54,8 @@ def load_events():
     """
     events = []
     try:
-        with open(INPUT_CSV, newline='') as f:
-            reader = csv.DictReader(f)
+        with open(INPUT_CSV, newline="") as csvfile:
+            reader = csv.DictReader(csvfile)
             for row in reader:
                 try:
                     t = float(row['time'])
@@ -79,6 +79,29 @@ def load_events():
     return sorted(events, key=lambda e: e['t'])
 
 
+# —— BPM calculation for live readout ——
+def calculate_bpm(times, window_start, now):
+    """
+    Given a list of clock pulse times and the current window, compute BPM.
+    """
+    window_pulses = [t for t in times if window_start <= t <= now]
+    if len(window_pulses) < 2:
+        return 0.0
+    diffs = [t2 - t1 for t1, t2 in zip(window_pulses, window_pulses[1:])]
+    avg_pulse = sum(diffs) / len(diffs)
+    return 60.0 / (avg_pulse * 24)
+
+
+# preload all clock times once
+CLOCK_TIMES = []
+with open(INPUT_CSV, newline="") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        if row["type"] == "clock":
+            CLOCK_TIMES.append(float(row["time"]))
+CLOCK_TIMES.sort()
+
+
 def start_ffmpeg():
     cmd = [
         'ffmpeg', '-y',
@@ -92,7 +115,7 @@ def start_ffmpeg():
 
 
 def draw_frame(now, notes, draw):
-    # map label positions
+    # map existing channels into swimlanes
     named_channels = [
         (ch, CHANNELS[ch])
         for ch in range(CHANNEL_COUNT)
@@ -101,57 +124,80 @@ def draw_frame(now, notes, draw):
     named_channels.sort(key=lambda x: x[1].lower())
     lanes = {ch: i for i, (ch, _) in enumerate(named_channels)}
 
-    # draw notes
     window_start = now - WINDOW_SEC
+
+    # draw clock-pulse ticks
+    bpm_lane = len(named_channels)
+    for i, t in enumerate(CLOCK_TIMES):
+        if window_start <= t <= now:
+            rel = (now - t) / WINDOW_SEC
+            x = WIDTH * max(0.0, 1 - rel)
+            y_base = bpm_lane * LANE_H
+
+            if (i % 16) == 0:
+                draw.line([(x, y_base + HEIGHT), (x, y_base - HEIGHT)], fill=(32, 32, 32), width=2)
+                draw.line([(x, y_base + 30), (x, y_base + LANE_H - 30)], fill=ACCENT_COLOR, width=6)
+            elif (i % 8) == 0:
+                draw.line([(x, y_base + 32), (x, y_base + LANE_H - 32)], fill=ACCENT_COLOR, width=5)
+            elif (i % 4) == 0:
+                draw.line([(x, y_base + 34), (x, y_base + LANE_H - 34)], fill=ACCENT_COLOR, width=4)
+            else:
+                draw.line([(x, y_base + 36), (x, y_base + LANE_H - 36)], fill=BAR_COLOR, width=3)
+
+    # draw note bars
     for n in notes:
-        t_on = n['t_on']
-        t_off = n['t_off'] if n['t_off'] is not None else now
+        t_on = n["t_on"]
+        t_off = n["t_off"] if n["t_off"] is not None else now
         if t_off < window_start:
             continue
-
         rel_start = (now - t_on) / WINDOW_SEC
         rel_end = (now - t_off) / WINDOW_SEC
         x0 = WIDTH * max(0.0, 1 - rel_start)
         x1 = WIDTH * max(0.0, 1 - rel_end)
         if x0 >= WIDTH:
             continue
-
-        ch = n['channel'] % CHANNEL_COUNT
-
+        ch = n["channel"] % CHANNEL_COUNT
         if ch not in lanes:
             continue
-
         lane = lanes[ch]
-
         y_base = lane * LANE_H
-        thickness = MIN_THICKNESS + (n['velocity'] / 127) * (LANE_H - MIN_THICKNESS) * 0.5
+        thickness = MIN_THICKNESS + (n["velocity"] / 127) * (LANE_H - MIN_THICKNESS) * 0.5
         y0 = y_base + (LANE_H - thickness) / 2
         y1 = y0 + thickness
         draw.rounded_rectangle([x0, y0, x1, y1], fill=BAR_COLOR, radius=8)
 
-    # swimlane labels
-    i = 0
-    for ch, lane in lanes.items():
-        label = CHANNELS[ch]
+    # compute live BPM from pulses in window
+    bpm_live = calculate_bpm(CLOCK_TIMES, window_start, now)
 
+    # draw swimlane labels for each MIDI channel
+    i = 0
+    for ch, _ in named_channels:
+        label = CHANNELS[ch]
         y_base = i * LANE_H
         bbox = draw.textbbox((0, 0), label, font=FONT)
         h = bbox[3] - bbox[1]
         y = y_base + (LANE_H - h) / 2 - 9
         draw.text((5, y), label, font=FONT, fill=LABEL_TEXT_COLOR)
-
         i += 1
+
+    # draw the dynamic BPM label
+    bpm_label = f"clock: {bpm_live:.2f}"
+    y_base = i * LANE_H
+    bbox = draw.textbbox((0, 0), bpm_label, font=FONT)
+    h = bbox[3] - bbox[1]
+    y = y_base + (LANE_H - h) / 2 - 9
+    draw.text((5, y), bpm_label, font=FONT, fill=LABEL_TEXT_COLOR)
 
 
 def main():
     events = load_events()
-    proc = start_ffmpeg()
-
     last_t = events[-1]['t']
     total_frames = int((last_t + WINDOW_SEC) * FPS) + 1
 
     notes = []
     idx = 0
+
+    proc = start_ffmpeg()
 
     for frame in range(total_frames):
         now = frame / FPS
@@ -177,10 +223,12 @@ def main():
         img = Image.new('RGB', (WIDTH, HEIGHT))
         draw = ImageDraw.Draw(img)
         draw_frame(now, notes, draw)
+
         proc.stdin.write(img.tobytes())
 
     proc.stdin.close()
     proc.wait()
+
 
 if __name__ == '__main__':
     main()

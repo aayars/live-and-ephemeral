@@ -18,7 +18,7 @@ PAIRS = [
     "crum bus",
     "solar 42f",
     "traktor",
-    "", "", "", "", "", "", ""
+    "", "", ""
 ]
 
 def visualize_mono_spectrum(
