@@ -1,29 +1,27 @@
 #!/usr/bin/env python3
 
-# Visualize a folder containing many single-channel WAVs (assume stereo pairs for labels)
-
 import sys
 from pathlib import Path
 import ffmpeg
 
 PAIRS = [
-    'hype',
-    'opx-4',
-    'kick',
-    'hi-hat',
-    'snare',
-    '', # guitar
-    '', # vocals
-    'microfreak 1',
-    'microfreak 2',
-    '303 bus',
-    'crum bus',
-    'solar 42f',
-    'traktor',
-    '', '', '', '', '', '', '']
+    "hype",
+    "opx-4",
+    "kick",
+    "hi-hat",
+    "snare",
+    "",       # guitar
+    "",       # vocals
+    "microfreak 1",
+    "microfreak 2",
+    "303 bus",
+    "crum bus",
+    "solar 42f",
+    "traktor",
+    "", "", "", "", "", "", ""
+]
 
-
-def visualize_mono_wavs(
+def visualize_mono_spectrum(
     input_dir: str,
     output_file: str,
     width: int = 1280,
@@ -38,49 +36,55 @@ def visualize_mono_wavs(
     font = "/Users/aayars/.noisemaker/fonts/DS-DIGIB.TTF"
 
     for wav in wav_files:
-        # trim as needed
+        # trim and reset timestamps
         stream = (
             ffmpeg
             .input(str(wav))
-            .filter('atrim', start=2400, duration=10)
-            .filter('asetpts', 'PTS-STARTPTS')
+            .filter("atrim", start=2400, duration=10)
+            .filter("asetpts", "PTS-STARTPTS")
         )
 
-        wave = (
+        # generate spectrum display instead of waveform
+        spec = (
             stream
-            .filter('showwaves', s=f"{width}x{per_channel_height}", mode='cline', colors='#800000')
-            .filter('format', 'rgba')
+            .filter(
+                "showspectrum",
+                s=f"{width}x{per_channel_height}",
+                mode="separate",
+                color="fiery",
+                slide="scroll",
+                scale="log",
+                win_func="hann"
+            )
+            .filter("format", "rgba")
         )
-        waves.append(wave)
+        waves.append(spec)
 
-    # collect labeled stereo streams
+    # pair up into stereo-like blocks and label
     labeled_streams = []
     for i in range(0, len(waves), 2):
         pair_num = i // 2
         label = PAIRS[pair_num]
-        if label == '':
+        if not label:
             continue
 
         left, right = waves[i], waves[i + 1]
-        stereo = ffmpeg.filter([left, right], 'vstack', inputs=2)
-
+        stereo = ffmpeg.filter([left, right], "vstack", inputs=2)
         labeled = stereo.filter(
-            'drawtext',
+            "drawtext",
             fontfile=font,
             text=label,
-            x='5',
-            y='20',
+            x="5",
+            y="20",
             fontsize=per_channel_height,
-            fontcolor='white'
+            fontcolor="white"
         )
         labeled_streams.append((label, labeled))
 
-    # sort by label alphabetically (case‑insensitive)
+    # sort alphabetically and stack vertically
     labeled_streams.sort(key=lambda x: x[0].lower())
     paired = [stream for _, stream in labeled_streams]
-
-    # stack all labeled stereo blocks in alphabetical order
-    final = ffmpeg.filter(paired, 'vstack', inputs=len(paired))
+    final = ffmpeg.filter(paired, "vstack", inputs=len(paired))
 
     (
         ffmpeg
@@ -88,17 +92,17 @@ def visualize_mono_wavs(
             final,
             output_file,
             r=fps,
-            pix_fmt='yuv420p',
-            movflags='+faststart'
+            pix_fmt="yuv420p",
+            movflags="+faststart"
         )
         .overwrite_output()
         .run()
     )
-
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print(f"Usage: {sys.argv[0]} <input_mono_wavs_dir> <output_mp4>", file=sys.stderr)
         sys.exit(1)
 
-    visualize_mono_wavs(sys.argv[1], sys.argv[2])
+    visualize_mono_spectrum(sys.argv[1], sys.argv[2])
+

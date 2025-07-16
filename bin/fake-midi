@@ -8,26 +8,26 @@ def generate_test_data(
     total_time=10.0,
     note_min=21,
     note_max=108,
-    event_count=150
+    event_count=150,
+    bpm=140.05
 ):
     events = []
 
+    # generate random note_on / note_off pairs
     for _ in range(event_count):
         t_on = random.uniform(0, total_time)
         note = random.randint(note_min, note_max)
-        vel = random.randint(1, 127)
-        ch = random.randint(0, 15)
+        velocity = random.randint(30, 127)
+        ch = random.randint(1, 16)
 
-        # note on
         events.append({
             "time":     t_on,
             "type":     "note_on",
             "note":     note,
-            "velocity": vel,
+            "velocity": velocity,
             "channel":  ch
         })
 
-        # note off
         t_off = min(total_time, t_on + random.uniform(0.05, 1.0))
         events.append({
             "time":     t_off,
@@ -37,10 +37,23 @@ def generate_test_data(
             "channel":  ch
         })
 
-    # sort events by timestamp
-    events.sort(key=lambda e: e["time"])
+    # generate MIDI clock pulses: 24 per quarter note
+    pulse_interval = 60.0 / bpm / 24.0
+    n_pulses = int(total_time / pulse_interval) + 1
 
-    # write CSV
+    for i in range(n_pulses):
+        t = i * pulse_interval
+        if t <= total_time:
+            events.append({
+                "time":     t,
+                "type":     "clock",
+                "note":     "",
+                "velocity": "",
+                "channel":  ""
+            })
+
+    # sort and write CSV
+    events.sort(key=lambda e: e["time"])
     with open(filename, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["time", "type", "note", "velocity", "channel"])
@@ -52,6 +65,7 @@ def generate_test_data(
                 e["velocity"],
                 e["channel"]
             ])
+
 
 if __name__ == "__main__":
     generate_test_data()

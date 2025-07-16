@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+
+import csv
+import sys
+import os
+import tempfile
+import subprocess
+from PIL import Image, ImageDraw, ImageFont
+
+# path to the same font used in viz-midi
+FONT_PATH = '/Users/aayars/.noisemaker/fonts/DS-DIGIB.TTF'
+
+def calculate_bpm(csv_path):
+    times = []
+    with open(csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row["type"] == "clock":
+                times.append(float(row["time"]))
+    if len(times) < 2:
+        raise ValueError("Not enough clock events to calculate BPM")
+    diffs = [t2 - t1 for t1, t2 in zip(times, times[1:])]
+    avg_pulse = sum(diffs) / len(diffs)
+    quarter_note = avg_pulse * 24
+    return 60.0 / quarter_note
+
+def render_bpm_video(bpm, output_path,
+                     duration=5.0, fps=30,
+                     width=640, height=360):
+    # font sizes: label smaller, number much larger
+    label_size = int(height * 0.2)
+    number_size = int(height * 0.5)
+    try:
+        label_font = ImageFont.truetype(FONT_PATH, label_size)
+        number_font = ImageFont.truetype(FONT_PATH, number_size)
+    except IOError:
+        label_font = ImageFont.load_default()
+        number_font = ImageFont.load_default()
+
+    tempdir = tempfile.mkdtemp(prefix="viz_bpm_")
+    frame_count = int(duration * fps)
+    label_text = "BPM:"
+    number_text = f"{bpm:.2f}"
+    spacing = int(height * 0.05)
+
+    for i in range(frame_count):
+        img = Image.new("RGB", (width, height), "black")
+        draw = ImageDraw.Draw(img)
+
+        lb_box = draw.textbbox((0, 0), label_text, font=label_font)
+        lb_w = lb_box[2] - lb_box[0]
+        lb_h = lb_box[3] - lb_box[1]
+
+        num_box = draw.textbbox((0, 0), number_text, font=number_font)
+        num_w = num_box[2] - num_box[0]
+        num_h = num_box[3] - num_box[1]
+
+        total_h = lb_h + spacing + num_h
+        start_y = (height - total_h) // 2
+
+        x_label = (width - lb_w) // 2
+        y_label = start_y
+
+        x_number = (width - num_w) // 2
+        y_number = y_label + lb_h + spacing
+
+        draw.text((x_label, y_label), label_text, fill="white", font=label_font)
+        draw.text((x_number, y_number), number_text, fill="white", font=number_font)
+
+        img.save(os.path.join(tempdir, f"frame_{i:04d}.png"))
+
+    subprocess.run([
+        "ffmpeg",
+        "-y",
+        "-framerate", str(fps),
+        "-i", os.path.join(tempdir, "frame_%04d.png"),
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        output_path
+    ], check=True)
+
+    for fname in os.listdir(tempdir):
+        os.remove(os.path.join(tempdir, fname))
+    os.rmdir(tempdir)
+
+def main():
+    if len(sys.argv) != 3:
+        print(f"Usage: {sys.argv[0]} <midi_csv> <output_mp4>")
+        sys.exit(1)
+
+    csv_path, output_path = sys.argv[1], sys.argv[2]
+    bpm = calculate_bpm(csv_path)
+    render_bpm_video(bpm, output_path)
+    print(f"BPM: {bpm:.2f}")
+
+if __name__ == "__main__":
+    main()
+
