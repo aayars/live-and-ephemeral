@@ -74,7 +74,7 @@ def visualize_mono_wavs(
             fontfile=font,
             text=label,
             x='5',
-            y='20',
+            y='26',
             fontsize=per_channel_height,
             fontcolor='white'
         )
