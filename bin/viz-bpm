@@ -88,7 +88,10 @@ def main():
         print(f"Usage: {sys.argv[0]} <midi_csv> <output_mp4>")
         sys.exit(1)
 
-    csv_path, output_path = sys.argv[1], sys.argv[2]
+    csv_path = sys.argv[1]
+
+    output_path = 'bpm-viz.mp4'
+
     bpm = calculate_bpm(csv_path)
     render_bpm_video(bpm, output_path)
     print(f"BPM: {bpm:.2f}")

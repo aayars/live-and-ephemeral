@@ -48,7 +48,12 @@ def visualize_mono_wavs(
 
         wave = (
             stream
-            .filter('showwaves', s=f"{width}x{per_channel_height}", mode='cline', colors='#800000')
+            .filter(
+                'showwaves',
+                s=f"{width}x{per_channel_height}",
+                mode='cline',
+                colors='#800000'
+            )
             .filter('format', 'rgba')
         )
         waves.append(wave)
@@ -97,8 +102,8 @@ def visualize_mono_wavs(
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <input_mono_wavs_dir> <output_mp4>", file=sys.stderr)
+    if len(sys.argv) != 2:
+        print(f"Usage: {sys.argv[0]} <input_mono_wavs_dir>", file=sys.stderr)
         sys.exit(1)
 
-    visualize_mono_wavs(sys.argv[1], sys.argv[2])
+    visualize_mono_wavs(sys.argv[1], 'wave-viz.mp4')

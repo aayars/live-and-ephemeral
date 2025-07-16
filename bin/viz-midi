@@ -25,7 +25,7 @@ CHANNELS = [
 
 
 INPUT_CSV      = "midi_events.csv"
-OUTPUT_VIDEO   = "output.mp4"
+OUTPUT_VIDEO   = "midi-viz.mp4"
 WIDTH          = 1280     # total video width
 HEIGHT         = 800
 FPS            = 30
@@ -36,7 +36,7 @@ LANE_H         = 80
 MIN_THICKNESS  = 2        # minimum bar thickness
 
 # colors
-BAR_COLOR        = (96, 0, 0)
+BAR_COLOR        = (127, 0, 0)
 LABEL_TEXT_COLOR = (255, 255, 255)
 
 # font for lane labels (using Nunito font from waveform visualizer)
