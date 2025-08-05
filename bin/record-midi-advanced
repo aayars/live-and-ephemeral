@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+
+import time
+import csv
+import mido
+import signal
+import sys
+import threading
+import collections
+import os
+
+OUTPUT_CSV = "midi_events.csv"
+WINDOW_SECONDS = 2.5
+FPS = 20
+LANE_WIDTH = 80
+
+channel_names = [f"Ch {i:02}" for i in range(16)]
+clock_name = "Clock"
+
+# 24 MIDI clock pulses per quarter note
+CLOCKS_PER_BEAT = 24
+
+event_lock = threading.Lock()
+note_events = collections.defaultdict(list)  # channel: list of (time, note, on/off)
+clock_times = []
+
+exit_flag = False
+
+def clear_screen():
+    os.system("clear" if os.name == "posix" else "cls")
+
+def graceful_exit(sig, frame):
+    global exit_flag
+    exit_flag = True
+
+signal.signal(signal.SIGINT, graceful_exit)
+
+def record_midi(port_name=None):
+    start = time.time()
+    inp = mido.open_input(port_name) if port_name else mido.open_input()
+
+    with open(OUTPUT_CSV, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["time", "type", "note", "velocity", "channel"])
+
+        for msg in inp:
+            now = time.time() - start
+
+            if msg.type in ("note_on", "note_off"):
+                chan = msg.channel
+                with event_lock:
+                    note_events[chan].append((now, msg.note, msg.type == "note_on"))
+                writer.writerow([
+                    f"{now:.6f}",
+                    msg.type,
+                    msg.note,
+                    msg.velocity,
+                    chan
+                ])
+
+            elif msg.type == "clock":
+                with event_lock:
+                    clock_times.append(now)
+                writer.writerow([
+                    f"{now:.6f}",
+                    "clock",
+                    "", "", ""
+                ])
+
+            if exit_flag:
+                break
+
+def bpm_from_clock(times, now):
+    recent = [t for t in times if now - t <= 1.0]
+    if len(recent) < 2:
+        return None
+    elapsed = recent[-1] - recent[0]
+    clocks = len(recent) - 1
+    if elapsed <= 0:
+        return None
+    bps = clocks / elapsed / CLOCKS_PER_BEAT
+    return round(bps * 60)
+
+def render_lane(events, now):
+    lane = [' '] * LANE_WIDTH
+    cutoff = now - WINDOW_SECONDS
+    for t, note, is_on in events:
+        if t < cutoff:
+            continue
+        x = int((t - cutoff) / WINDOW_SECONDS * LANE_WIDTH)
+        if 0 <= x < LANE_WIDTH:
+            lane[x] = '█' if is_on else '·'
+    return ''.join(lane)
+
+def render_clock_lane(times, now):
+    lane = [' '] * LANE_WIDTH
+    cutoff = now - WINDOW_SECONDS
+    for t in times:
+        if t < cutoff:
+            continue
+        x = int((t - cutoff) / WINDOW_SECONDS * LANE_WIDTH)
+        if 0 <= x < LANE_WIDTH:
+            lane[x] = '|'
+    bpm = bpm_from_clock(times, now)
+    bpm_label = f"{bpm} BPM" if bpm else "..."
+    bpm_pos = max(0, LANE_WIDTH - len(bpm_label))
+    lane[bpm_pos:] = bpm_label
+    return ''.join(lane)
+
+def visual_loop():
+    while not exit_flag:
+        clear_screen()
+        now = time.time()
+        cutoff = now - WINDOW_SECONDS
+
+        with event_lock:
+            for ch in range(16):
+                events = [(t, n, on) for t, n, on in note_events[ch] if t >= cutoff]
+                note_events[ch] = events
+                line = render_lane(events, now)
+                print(f"{channel_names[ch]:<6}: {line}")
+
+            clock_recent = [t for t in clock_times if t >= cutoff]
+            clock_times[:] = clock_recent
+            print(f"{clock_name:<6}: {render_clock_lane(clock_recent, now)}")
+
+        time.sleep(1 / FPS)
+
+def main(port_name=None):
+    visual_thread = threading.Thread(target=visual_loop, daemon=True)
+    visual_thread.start()
+
+    record_midi(port_name)
+
+if __name__ == "__main__":
+    main()
+

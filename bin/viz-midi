@@ -11,22 +11,22 @@ CHANNELS = [
     'solar 42f',
     '303 1',
     '303 2',
-    '',
+    'synthcaster',
     '',
     'microfreak 1',
     'microfreak 2',
     '',
-    'hype',
     'opx-4',
+    'hype',
     'kick',
     'hi-hat',
     'snare',
     '', '', '', '', '', '', ''
 ]
 INPUT_CSV      = "midi_events.csv"
-OUTPUT_VIDEO   = "midi-viz.mp4"
+OUTPUT_VIDEO   = "midi-viz-fixed.mp4"
 WIDTH          = 1280     # total video width
-HEIGHT         = 880
+HEIGHT         = 960
 FPS            = 30
 WINDOW_SEC     = 2.5      # time window in seconds
 CHANNEL_COUNT  = 16
@@ -167,7 +167,7 @@ def draw_frame(now, notes, draw):
         draw.rounded_rectangle([x0, y0, x1, y1], fill=BAR_COLOR, radius=8)
 
     # compute live BPM from pulses in window
-    bpm_live = calculate_bpm(CLOCK_TIMES, window_start, now)
+    bpm_live = calculate_bpm(CLOCK_TIMES, window_start - 10, now)
 
     # draw swimlane labels for each MIDI channel
     i = 0

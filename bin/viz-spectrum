@@ -5,12 +5,12 @@ from pathlib import Path
 import ffmpeg
 
 PAIRS = [
-    "hype",
     "opx-4",
+    "hype",
     "kick",
     "hi-hat",
     "snare",
-    "",       # guitar
+    "synthcaster",       # guitar
     "",       # vocals
     "microfreak 1",
     "microfreak 2",
@@ -40,7 +40,7 @@ def visualize_mono_spectrum(
         stream = (
             ffmpeg
             .input(str(wav))
-            .filter("atrim", start=2400, duration=10)
+            # .filter("atrim", start=2400, duration=10)
             .filter("asetpts", "PTS-STARTPTS")
         )
 
