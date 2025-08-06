@@ -33,22 +33,27 @@ def run_ffmpeg(cmd: List[str]) -> None:
         raise RuntimeError(proc.stderr)
 
 # ---------------------------------------------------------------------------
-# Pulse‑pattern detection
+# Pulse-pattern detection
 # ---------------------------------------------------------------------------
 
-def read_mono(path: Path, sr: int) -> np.ndarray:
-    audio, _ = librosa.load(path.as_posix(), sr=sr, mono=True)
-    return audio
-
+def read_channel(path: Path, sr: int, channel: int) -> np.ndarray:
+    print(f"Reading {path}")
+    # Read a specific channel from a multi-channel wav file
+    data, file_sr = sf.read(path.as_posix(), always_2d=True)
+    if file_sr != sr:
+        raise RuntimeError(f"Expected sample rate {sr}, got {file_sr}")
+    if channel >= data.shape[1]:
+        raise RuntimeError(f"Channel {channel} out of range for file {path} (has {data.shape[1]} channels)")
+    return data[:, channel]
 
 def detect_123_pattern(audio: np.ndarray, sr: int) -> int | None:
-    """Return sample index of the first pulse in a 1‑2‑3 burst pattern.
+    """Return sample index of the first pulse in a 1-2-3 burst pattern.
 
     Pattern definition (rough):
       pulse
-      ~0.4‑1.0 s gap
+      ~0.4-1.0 s gap
       pulse   pulse  (≤0.3 s apart)
-      ~0.4‑1.0 s gap
+      ~0.4-1.0 s gap
       pulse   pulse   pulse (≤0.3 s between each)
 
     If not found, return None.
@@ -61,29 +66,33 @@ def detect_123_pattern(audio: np.ndarray, sr: int) -> int | None:
 
     times = peaks * 512 / sr  # onset_strength default hop=512
 
-    # Scan windows of 6 peaks for 1‑2‑3 pattern
+    # Scan windows of 6 peaks for 1-2-3 pattern
     for i in range(len(times) - 5):
         grp = times[i : i + 6]
         g01 = grp[1] - grp[0]
+        g12 = grp[2] - grp[1]
         g23 = grp[3] - grp[2]
+        g34 = grp[4] - grp[3]
         g45 = grp[5] - grp[4]
-        in_pair_1 = grp[2] - grp[1] <= 0.3
-        in_pair_2 = grp[4] - grp[3] >= 0.4 and grp[4] - grp[3] <= 1.0  # gap between 2‑click group and 3‑click group starts
-        three_spacing = g45 <= 0.3 and grp[4] - grp[3] <= 0.3
-        if (
-            0.4 <= g01 <= 1.0
-            and in_pair_1
-            and in_pair_2
-            and three_spacing
-        ):
+
+        # first pair: 0.4–1.0s
+        in_first_pair = 0.4 <= g01 <= 1.0
+        # second pulse pair within ≤0.3s
+        in_second_group = g12 <= 0.3
+        # gap between the two-pulse and three-pulse group: 0.4–1.0s
+        inter_gap = 0.4 <= g23 <= 1.0
+        # three-pulse spacing both ≤0.3s
+        three_spacing = g34 <= 0.3 and g45 <= 0.3
+
+        if in_first_pair and in_second_group and inter_gap and three_spacing:
             return int(peaks[i] * 512)
     return None
 
-
 def detect_first_peak(audio: np.ndarray, sr: int) -> int:
-    onset_frames = librosa.onset.onset_detect(y=audio, sr=sr, backtrack=False)
+    # Onset detection – gives frame indices of transient peaks
+    # backtrack=True pins the onset to the nearest preceding maximum
+    onset_frames = librosa.onset.onset_detect(y=audio, sr=sr, backtrack=True)
     return int(onset_frames[0] * 512) if len(onset_frames) else 0
-
 
 def detect_offset(audio: np.ndarray, sr: int) -> int:
     off = detect_123_pattern(audio, sr)
@@ -99,23 +108,35 @@ Event = Tuple[float, str, int, List[int]]
 def parse_midi_csv(path: Path) -> List[Event]:
     ev: List[Event] = []
     with path.open() as fh:
-        for row in csv.reader(fh):
-            if not row:
+        reader = csv.reader(fh)
+        for row in reader:
+            if not row or row[0].lower() in {"time", "timestamp"}:
                 continue
-            t = float(row[0])
-            status = row[1]
-            if status in {"note_on", "note_off", "cc", "pb"}:
-                ch = int(row[2]); data = [int(x) for x in row[3:]]
-            else:
-                ch, data = -1, [int(x) for x in row[2:]]
-            ev.append((t, status, ch, data))
-    return ev
 
+            try:
+                t = float(row[0])
+                status = row[1]
+
+                if status in {"note_on", "note_off", "cc", "pb"}:
+                    ch = int(row[2])
+                    if not (0 <= ch <= 15):
+                        continue
+                    data = [int(x) for x in row[3:] if x.strip()]
+                    ev.append((t, status, ch, data))
+
+                elif status == "clock":
+                    ev.append((t, status, 0, []))  # valid timing event, no channel
+
+                # skip all other status types
+
+            except (ValueError, IndexError):
+                continue
+
+    return ev
 
 def bpm_from_clock(events: List[Event]) -> float:
     clk = [t for t, s, _, _ in events if s == "clock"]
     return float(np.median(60 / (np.diff(clk) * 24))) if len(clk) > 1 else 0.0
-
 
 def write_midi(events: List[Event], bpm: float, out: Path, ch_filter: int | None = None) -> None:
     mid = mido.MidiFile(); tr = mido.MidiTrack(); mid.tracks.append(tr)
@@ -135,21 +156,31 @@ def write_midi(events: List[Event], bpm: float, out: Path, ch_filter: int | None
 # ---------------------------------------------------------------------------
 # Path helpers / trim routine
 # ---------------------------------------------------------------------------
-
 def ensure_parent(p: Path) -> None: p.parent.mkdir(parents=True, exist_ok=True)
 
 def mirrored(src: Path, base: Path, out_root: Path) -> Path:
+    # Output path mirrors input, appending _aligned before extension
     rel = src.relative_to(base); dst = out_root / base.name / rel
     ensure_parent(dst); return dst.with_name(rel.stem + "_aligned" + rel.suffix)
 
+def trim_multichannel_wav(src: Path, off: int, sr: int, base: Path, out_root: Path):
+    # Trim multi-channel wav file from sample offset, write to mirrored path
+    data, file_sr = sf.read(src.as_posix(), always_2d=True)
+    if file_sr != sr:
+        raise RuntimeError(f"Expected sample rate {sr}, got {file_sr}")
+    start = off
+    trimmed = data[start:, :]
+    dst = mirrored(src, base, out_root)
+    sf.write(dst.as_posix(), trimmed, sr, subtype="PCM_24")
+    return dst
 
-def trim_group(files: List[Path], off: int, sr: int, base: Path, out_root: Path, is_video=False):
+def trim_video(files: List[Path], off: int, sr: int, base: Path, out_root: Path):
+    # Trim video files using ffmpeg
     start = off / sr
     for f in files:
         dst = mirrored(f, base, out_root)
-        cmd = ["ffmpeg", "-y", "-i", f.as_posix(), "-ss", f"{start}"]
-        cmd += (["-c", "copy"] if is_video else ["-c:a", "pcm_s24le"])
-        cmd.append(dst.as_posix()); run_ffmpeg(cmd)
+        cmd = ["ffmpeg", "-y", "-ss", f"{start}", "-i", f.as_posix(), "-c", "copy", dst.as_posix()]
+        run_ffmpeg(cmd)
 
 # ---------------------------------------------------------------------------
 # Main entry
@@ -157,28 +188,71 @@ def trim_group(files: List[Path], off: int, sr: int, base: Path, out_root: Path,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stereo_dir", type=Path, required=True)
-    ap.add_argument("--multitrack_dir", type=Path, required=True)
+    ap.add_argument("--stereo_wav", type=Path, required=True, help="Path to stereo multichannel WAV")
+    ap.add_argument("--multitrack_wav", type=Path, required=True, help="Path to multitrack multichannel WAV")
     ap.add_argument("--midi_log", type=Path, required=True)
     ap.add_argument("--video", type=Path, required=True)
     ap.add_argument("--output_dir", type=Path, default=Path("aligned_output"))
-    ap.add_argument("--sr", type=int, default=48000)
+    ap.add_argument("--sr", type=int, default=44100)
+    ap.add_argument("--detect_channel", type=int, default=0, help="Channel to use for cue detection")
     args = ap.parse_args(); args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- collect files ----
-    stereo = sorted(args.stereo_dir.glob("*.wav")); multi = sorted(args.multitrack_dir.glob("*.wav"))
-    if len(stereo) < 2: raise RuntimeError("Require L & R WAVs in stereo_dir")
+    # Instead of collecting multiple mono files, use single multi-channel WAV for stereo and multitrack
 
-    # ---- detect per‑group offsets ----
-    stereo_off = detect_offset(read_mono(stereo[0], args.sr), args.sr)
-    multi_off = detect_offset(read_mono(multi[-1], args.sr), args.sr) if multi else stereo_off
+    # ---- detect per-group offsets ----
+    stereo_off = detect_offset(read_channel(args.stereo_wav, args.sr, args.detect_channel), args.sr)
+    multi_off  = detect_offset(read_channel(args.multitrack_wav, args.sr, args.detect_channel), args.sr)
 
     tmp = args.output_dir / "_vid.wav"
-    run_ffmpeg(["ffmpeg", "-y", "-i", args.video.as_posix(), "-vn", "-acodec", "pcm_s24le", tmp.as_posix()])
-    video_off = detect_offset(read_mono(tmp, args.sr), args.sr); tmp.unlink(missing_ok=True)
+    # run_ffmpeg(["ffmpeg", "-y", "-i", args.video.as_posix(), "-vn", "-acodec", "pcm_s24le", tmp.as_posix()])
+    # video_off = detect_offset(read_channel(tmp, args.sr, args.detect_channel), args.sr); tmp.unlink(missing_ok=True)
+    run_ffmpeg([
+        "ffmpeg", "-y",
+        "-i", args.video.as_posix(),
+        "-vn",
+        "-acodec", "pcm_s24le",  # 24-bit signed little-endian PCM
+        "-ar", str(args.sr),     # Explicit sample rate (default: 44100)
+        "-ac", "2",              # Force stereo, adjust if needed
+        tmp.as_posix()
+    ])
+    video_off = detect_offset(read_channel(tmp, args.sr, args.detect_channel), args.sr)
+    tmp.unlink(missing_ok=True)
+
+
 
     # ---- trim groups independently ----
-    trim_group(stereo, stereo_off, args.sr, args.stereo_dir, args.output_dir)
-    trim_group(multi, multi_off, args.sr, args.multitrack_dir, args.output_dir)
-    trim_group([args.video], video_off, args.sr, args.video.parent, args.output
+    trim_multichannel_wav(args.stereo_wav,     stereo_off, args.sr, args.stereo_wav.parent,     args.output_dir)
+    trim_multichannel_wav(args.multitrack_wav, multi_off,  args.sr, args.multitrack_wav.parent, args.output_dir)
+    trim_video([args.video], video_off, args.sr, args.video.parent, args.output_dir)
+
+    # ---- MIDI handling with offset applied ----
+    midi_events = parse_midi_csv(args.midi_log)
+    bpm         = bpm_from_clock(midi_events)
+
+    # offset_sec      = stereo_off / args.sr
+    # adjusted_events = [(t - offset_sec, status, ch, data) for (t, status, ch, data) in midi_events]
+    offset_sec = stereo_off / args.sr
+
+    # Step 1: Apply initial alignment offset
+    adjusted = [(t - offset_sec, status, ch, data) for (t, status, ch, data) in midi_events]
+
+    # Step 2: Ensure earliest time is zero by shifting everything forward
+    min_t = min((t for t, *_ in adjusted), default=0)
+    if min_t < 0:
+        adjusted_events = [(t - min_t, status, ch, data) for (t, status, ch, data) in adjusted]
+    else:
+        adjusted_events = adjusted
+
+
+    midi_out_path = args.output_dir / "combined_aligned.mid"
+    write_midi(adjusted_events, bpm, midi_out_path)
+
+    channels = sorted({ch for _, _, ch, _ in midi_events if ch >= 0})
+    for ch in channels:
+        ch_path = args.output_dir / f"channel_{ch}_aligned.mid"
+        write_midi(adjusted_events, bpm, ch_path, ch_filter=ch)
+
+if __name__ == "__main__":
+    main()
 
